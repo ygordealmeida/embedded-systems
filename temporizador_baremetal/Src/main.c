@@ -18,6 +18,8 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+
 #define STM32F446xx
 #include "stm32f4xx.h"
 #if !defined(__SOFT_FP__) && defined(__ARM_FP)
@@ -27,7 +29,7 @@
 int main(void)
 {
 	volatile uint32_t overflow_count = 0;
-	volatile double frequency=0, current=0, period=0, last=0;
+	volatile double frequency=0, current=0, period=0, last=0, ultima_freq=0;
 	/* enable GPIOA clock */
 	RCC->AHB1ENR |= 1;
 	/* clear pin mode */
@@ -55,9 +57,6 @@ int main(void)
 	/* enable TIM2 */
 	TIM2->CR1 = 1;
 
-	//GPIOA->PUPDR &= ~0x0000C000; // Limpa bits de pull-up/pull-down para PA7
-	//GPIOA->PUPDR |= 0x00004000;  // Configura PA7 com pull-down
-
 
 	//Habilita o pino PA7 na função alternativa
 	GPIOA->MODER &= ~0x0000C000;    // Poderia usar dessa forma tmb(GPIO_MODER_MODE7_0 | GPIO_MODER_MODE5_7);
@@ -68,8 +67,8 @@ int main(void)
 
 	/* Habilita o clock do TIM14 */
 	RCC->APB1ENR |= RCC_APB1ENR_TIM14EN;
-	/* Configura o prescaler para dividir por 8000 (2kHz) */
-	TIM14->PSC = 8000 - 1;
+	/* Configura o prescaler para dividir por 800 (20kHz) */
+	TIM14->PSC = 800 - 1;
 	/* Configura o TIM14 para captura na borda de subida no canal 1 */
 	TIM14->CCMR1 = TIM_CCMR1_CC1S_0;  // CC1S = 01 -> canal 1 como entrada
 	/* Habilita a captura na borda de subida e ativa o canal */
@@ -84,37 +83,30 @@ int main(void)
 while(1){
 	while (!(TIM14->SR & 2)) {
 		if(TIM14->SR & 1){   //Verifica se contou até o maximo no UIF
-			overflow_count++;
-			TIM14->SR &= ~1; //Limpa a flag de UIF
-		}
-
-	} /* wait until input edge is captured */
-		current = TIM14->CCR1; /* readcaptured counter value */
-		if(current>=last){
-			period = (current +overflow_count*65536 - last)/2000; /* calculate the period */
-			frequency = 1/ period;
-			overflow_count=0;
+					overflow_count++; //add +1 nessa variavel que sera usada pra medir o tempo
+					TIM14->SR &= ~1; //Limpa a flag de UIF
+				}
+	}/* wait until input edge is captured */
+	current = TIM14->CCR1; //Salva o valor de tempo atual
+	if(current>=last){
+				period = (current +overflow_count*65536 - last)/20000; /* calculate the period */
+				frequency = 1/ period;
+				overflow_count=0;
 	}
-		last = current;
+	last = current;
+
+	//verifica se teve diferença de 2 na frequencia isso evita o led irreguar ao ajustar ele sempre
+	if(frequency<50 && (abs(frequency-ultima_freq)> 2)){
+				TIM2->CR1 = 0;
+				TIM2->ARR = (period*10000-1);
+				TIM2->CCER |= 1;
+				/* clear timer counter */
+				TIM2->CNT = 0;
+				/* enable TIM2 */
+				TIM2->CR1 = 1;
+				ultima_freq = frequency;
+				}
 
 
-		if(frequency<50){
-			TIM2->ARR = period*(10000-1);
-			TIM2->CCER |= 1;
-			/* clear timer counter */
-			TIM2->CNT = 0;
-			/* enable TIM2 */
-			TIM2->CR1 = 1;
-			}
-
-		else if(frequency>200){
-			TIM2->ARR = 2*(10000-1);
-			TIM2->CCER |= 1;
-			/* clear timer counter */
-			TIM2->CNT = 0;
-			/* enable TIM2 */
-			TIM2->CR1 = 1;
-			}
-	}
-
+}
 }
